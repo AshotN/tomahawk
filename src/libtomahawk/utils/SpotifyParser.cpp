@@ -37,6 +37,10 @@
 
 #include <QNetworkAccessManager>
 
+#include <QJsonObject>
+#include <QJsonDocument>
+
+
 using namespace Tomahawk;
 
 QPixmap* SpotifyParser::s_pixmap = 0;
@@ -196,15 +200,18 @@ SpotifyParser::lookupTrack( const QString& link )
         return;
 
     // we need Spotify URIs such as spotify:track:XXXXXX, so if we by chance get a http://open.spotify.com url, convert it
-    QString uri = link;
+
+    QString hash = link;
     if ( link.contains( "open.spotify.com" ) || link.contains( "play.spotify.com" ) )
     {
-        QString hash = link;
         hash.replace( "http://open.spotify.com/track/", "" ).replace( "http://play.spotify.com/track/", "" );
-        uri = QString( "spotify:track:%1" ).arg( hash );
     }
 
-    QUrl url = QUrl( QString( "http://ws.spotify.com/lookup/1/.json?uri=%1" ).arg( uri ) );
+    hash.replace( "spotify:track:", "" );
+
+    tLog() << "Spotify Link Thing:" << link;
+    tLog() << "Spotify Hash Thing:" << hash;
+    QUrl url = QUrl( QString( "https://api.spotify.com/v1/tracks/%1" ).arg( hash ) );
 
     NetworkReply* reply = new NetworkReply( Tomahawk::Utils::nam()->get( QNetworkRequest( url ) ) );
     connect( reply, SIGNAL( finished() ), SLOT( spotifyTrackLookupFinished() ) );
@@ -308,23 +315,37 @@ SpotifyParser::spotifyTrackLookupFinished()
             checkTrackFinished();
             return;
         }
-        else if ( !res.contains( "track" ) )
+
+
+        // Parse document
+        QJsonDocument doc(QJsonDocument::fromJson(jsonData));
+
+        // Get JSON object
+        QJsonObject jsonObject = doc.object();
+
+        if ( jsonObject["type"].toString() != "track" )
         {
-            tLog() << "No 'track' item in the spotify track lookup result... not doing anything";
+            tLog() << "No 'type' item in the spotify track lookup result... not doing anything" << res;
             checkTrackFinished();
             return;
         }
+        tLog() << "Parsing Spotify Song: " << jsonObject["name"].toString();
 
         // lets parse this baby
         QVariantMap t = res.value( "track" ).toMap();
         QString title, artist, album;
 
-        title = t.value( "name", QString() ).toString();
-        // TODO for now only take the first artist
-        if ( t.contains( "artists" ) && t[ "artists" ].canConvert< QVariantList >() && t[ "artists" ].toList().size() > 0 )
-            artist = t[ "artists" ].toList().first().toMap().value( "name", QString() ).toString();
-        if ( t.contains( "album" ) && t[ "album" ].canConvert< QVariantMap >() )
-            album = t[ "album" ].toMap().value( "name", QString() ).toString();
+        title = jsonObject["name"].toString();
+
+        QVariantMap c = jsonObject.toVariantMap();
+
+
+        artist = c["artists"].toList().first().toMap().value( "name", QString() ).toString();
+        album = c["album"].toMap().value( "name", QString() ).toString();
+
+        tLog() << "artist: " << artist;
+        tLog() << "album: " << album;
+
 
         if ( title.isEmpty() && artist.isEmpty() ) // don't have enough...
         {
