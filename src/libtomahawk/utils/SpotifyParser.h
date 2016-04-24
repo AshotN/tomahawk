@@ -70,7 +70,7 @@ signals:
 
 private slots:
     void spotifyTrackLookupFinished();
-    void spotifyBrowseFinished();
+    void spotifyAlbumBrowseFinished();
 
     void playlistCreated();
 private:

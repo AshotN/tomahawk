@@ -52,7 +52,7 @@
 
 using namespace Tomahawk;
 
-bool DropJob::s_canParseSpotifyPlaylists = false;
+bool DropJob::s_canParseSpotifyPlaylists = true;
 static QString s_dropJobInfoId = "dropjob";
 
 DropJob::DropJob( QObject *parent )
@@ -165,8 +165,9 @@ DropJob::acceptsMimeData( const QMimeData* data, DropJob::DropTypes acceptedType
         if ( urlList.contains( "xspf" ) )
             return true;
 
+        tLog() << "Can Parse Spotify???" << s_canParseSpotifyPlaylists;
         // Not the most elegant
-        if ( url.contains( "spotify" ) && url.contains( "playlist" ) && s_canParseSpotifyPlaylists )
+        if ( url.contains( "spotify" ) && url.contains( "playlist" ) /*&& s_canParseSpotifyPlaylists*/ )
             return true;
 
         if ( url.contains( "grooveshark.com" ) && url.contains( "playlist" ) )
@@ -296,7 +297,7 @@ DropJob::isDropType( DropJob::DropType desired, const QMimeData* data )
             return true;
 
         // Not the most elegant
-        if ( url.contains( "spotify" ) && url.contains( "playlist" ) && s_canParseSpotifyPlaylists )
+        if ( url.contains( "spotify" ) && url.contains( "playlist" ) /*&& s_canParseSpotifyPlaylists*/ )
             return true;
 
         if ( url.contains( "rdio.com" ) && url.contains( "people" ) && url.contains( "playlist" ) )
@@ -645,6 +646,8 @@ DropJob::handleSpotifyUrls( const QString& urlsRaw )
     QStringList urls = urlsRaw.split( QRegExp( "\\s+" ), QString::SkipEmptyParts );
     qDebug() << "Got spotify browse uris!" << urls;
 
+    tLog() << "Got spotify browse uris!" << urls;
+
     /// Lets allow parsing all spotify uris here, if parse server is not available
     /// fallback to spotify metadata for tracks /hugo
     if ( dropAction() == Default )
@@ -706,13 +709,14 @@ DropJob::setCanParseSpotifyPlaylists( bool parseable )
 void
 DropJob::handleAllUrls( const QString& urls )
 {
+    tLog() << "Handle URLs: " << urls << ":" << s_canParseSpotifyPlaylists;
     if ( urls.contains( "xspf" ) )
         handleXspfs( urls );
     else if ( urls.contains( "m3u" ) )
         handleM3u( urls );
     else if ( urls.contains( "spotify" ) /// Handle all the spotify uris on internal server, if not avail. fallback to spotify
               && ( urls.contains( "playlist" ) || urls.contains( "artist" ) || urls.contains( "album" ) || urls.contains( "track" ) )
-              && s_canParseSpotifyPlaylists )
+              /*&& s_canParseSpotifyPlaylists*/ )
         handleSpotifyUrls( urls );
 #ifdef QCA2_FOUND
     else if ( urls.contains( "grooveshark.com" ) )

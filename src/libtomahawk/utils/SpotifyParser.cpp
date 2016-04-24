@@ -37,6 +37,11 @@
 
 #include <QNetworkAccessManager>
 
+#include <QJsonObject>
+#include <QJsonDocument>
+#include <QJsonArray>
+
+
 using namespace Tomahawk;
 
 QPixmap* SpotifyParser::s_pixmap = 0;
@@ -140,6 +145,7 @@ SpotifyParser::lookupSpotifyBrowse( const QString& link )
     // Used in checkBrowseFinished as identifier
     m_browseUri = link;
 
+    //Not sure what this is, so i'll leave it - Hego
     if ( m_browseUri.contains( "playlist" ) &&
          Tomahawk::Accounts::SpotifyAccount::instance() != 0 &&
          Tomahawk::Accounts::SpotifyAccount::instance()->loggedIn() )
@@ -152,40 +158,58 @@ SpotifyParser::lookupSpotifyBrowse( const QString& link )
         message[ "id" ] = m_browseUri;
 
         QMetaObject::invokeMethod( Tomahawk::Accounts::SpotifyAccount::instance(), "sendMessage", Qt::QueuedConnection, Q_ARG( QVariantMap, message ),
-                                                                                                                        Q_ARG( QObject*, this ),
-                                                                                                                        Q_ARG( QString, "playlistListingResult" ) );
+                                   Q_ARG( QObject*, this ),
+                                   Q_ARG( QString, "playlistListingResult" ) );
 
         return;
     }
 
+    QString hash = m_browseUri;
+
     DropJob::DropType type;
 
-    if ( m_browseUri.contains( "spotify:user" ) )
+    if ( m_browseUri.contains( "spotify:user" ) ) {
         type = DropJob::Playlist;
-    else if ( m_browseUri.contains( "spotify:artist" ) )
+        hash.replace( "spotify:user:", "" );
+    }
+    else if ( m_browseUri.contains( "spotify:artist" ) ) {
         type = DropJob::Artist;
-    else if ( m_browseUri.contains( "spotify:album" ) )
+        hash.replace( "spotify:artist:", "" );
+    }
+    else if ( m_browseUri.contains( "spotify:album" ) ) {
         type = DropJob::Album;
-    else if ( m_browseUri.contains( "spotify:track" ) )
+        hash.replace( "spotify:album:", "" );
+    }
+    else if ( m_browseUri.contains( "spotify:track" ) ) {
         type = DropJob::Track;
-    else
+        hash.replace( "spotify:track:", "" );
+    }
+    else {
         return; // Type not supported.
+    }
 
+    tLog() << "YEP YEP" << m_browseUri;
     QUrl url;
 
-    if ( type != DropJob::Artist )
-         url = QUrl( QString( SPOTIFY_PLAYLIST_API_URL "/browse/%1" ).arg( m_browseUri ) );
-    else
-         url = QUrl( QString( SPOTIFY_PLAYLIST_API_URL "/browse/%1/%2" ).arg( m_browseUri )
-                                                                        .arg ( m_limit ) );
+    if ( type == DropJob::Album ){
+        url = QUrl( QString( "https://api.spotify.com/v1/albums/%1" ).arg( hash ) );
 
-    NetworkReply* reply = new NetworkReply( Tomahawk::Utils::nam()->get( QNetworkRequest( url ) ) );
-    connect( reply, SIGNAL( finished() ), SLOT( spotifyBrowseFinished() ) );
+        NetworkReply* reply = new NetworkReply( Tomahawk::Utils::nam()->get( QNetworkRequest( url ) ) );
+        connect( reply, SIGNAL( finished() ), SLOT( spotifyAlbumBrowseFinished() ) );
 
-    m_browseJob = new DropJobNotifier( pixmap(), "Spotify", type, reply );
-    JobStatusView::instance()->model()->addJob( m_browseJob );
+        m_browseJob = new DropJobNotifier( pixmap(), "Spotify", type, reply );
+        JobStatusView::instance()->model()->addJob( m_browseJob );
 
-    m_queries.insert( reply );
+        m_queries.insert( reply );
+    }
+    else{
+        tLog() << "Bad type: " << type;
+        return;
+    }
+
+    tLog() << "SpotifyParse: " << url;
+
+
 }
 
 
@@ -196,15 +220,18 @@ SpotifyParser::lookupTrack( const QString& link )
         return;
 
     // we need Spotify URIs such as spotify:track:XXXXXX, so if we by chance get a http://open.spotify.com url, convert it
-    QString uri = link;
+
+    QString hash = link;
     if ( link.contains( "open.spotify.com" ) || link.contains( "play.spotify.com" ) )
     {
-        QString hash = link;
         hash.replace( "http://open.spotify.com/track/", "" ).replace( "http://play.spotify.com/track/", "" );
-        uri = QString( "spotify:track:%1" ).arg( hash );
     }
 
-    QUrl url = QUrl( QString( "http://ws.spotify.com/lookup/1/.json?uri=%1" ).arg( uri ) );
+    hash.replace( "spotify:track:", "" );
+
+    tLog() << "Spotify Link Thing:" << link;
+    tLog() << "Spotify Hash Thing:" << hash;
+    QUrl url = QUrl( QString( "https://api.spotify.com/v1/tracks/%1" ).arg( hash ) );
 
     NetworkReply* reply = new NetworkReply( Tomahawk::Utils::nam()->get( QNetworkRequest( url ) ) );
     connect( reply, SIGNAL( finished() ), SLOT( spotifyTrackLookupFinished() ) );
@@ -217,8 +244,9 @@ SpotifyParser::lookupTrack( const QString& link )
 
 
 void
-SpotifyParser::spotifyBrowseFinished()
+SpotifyParser::spotifyAlbumBrowseFinished()
 {
+    tLog() << "Spotify Browse Finished!";
     NetworkReply* r = qobject_cast< NetworkReply* >( sender() );
     Q_ASSERT( r );
     r->deleteLater();
@@ -230,33 +258,32 @@ SpotifyParser::spotifyBrowseFinished()
         QByteArray jsonData = r->reply()->readAll();
         QVariantMap res = TomahawkUtils::parseJson( jsonData, &ok ).toMap();
 
-        if ( !ok )
+        // Parse document
+        QJsonDocument doc(QJsonDocument::fromJson(jsonData));
+
+        // Get JSON object
+        QJsonObject jsonObject = doc.object();
+
+        if ( jsonObject.isEmpty() )
         {
             tLog() << "Failed to parse json from Spotify browse item:" << jsonData;
             checkTrackFinished();
             return;
         }
+                QJsonArray items = jsonObject["tracks"].toObject()["items"].toArray();
 
-        QVariantMap resultResponse = res.value( res.value( "type" ).toString() ).toMap();
-        if ( !resultResponse.isEmpty() )
-        {
-            m_title = resultResponse.value( "name" ).toString();
-            m_single = false;
-
-            if ( res.value( "type" ).toString() == "playlist" )
-                m_creator = resultResponse.value( "creator" ).toString();
 
             // TODO for now only take the first artist
-            foreach ( QVariant result, resultResponse.value( "result" ).toList() )
+            QString album = jsonObject["name"].toString();
+            foreach ( QJsonValue item, items )
             {
-                QVariantMap trackResult = result.toMap();
 
-                QString title, artist, album;
+               QString title, artist;
 
-                title = trackResult.value( "title", QString() ).toString();
-                artist = trackResult.value( "artist", QString() ).toString();
-                album = trackResult.value( "album", QString() ).toString();
+                title = item.toObject()["name"].toString();
+                artist = item.toObject()["artists"].toArray()[0].toObject()["name"].toString();
 
+                tLog() << "Title: " << title << "   Artist: " << artist << "    Album: " << album;
                 if ( title.isEmpty() && artist.isEmpty() ) // don't have enough...
                 {
                     tLog() << "Didn't get an artist and track name from spotify, not enough to build a query on. Aborting" << title << artist << album;
@@ -267,12 +294,12 @@ SpotifyParser::spotifyBrowseFinished()
                 if ( q.isNull() )
                     continue;
 
-                tLog() << "Setting resulthint to " << trackResult.value( "trackuri" );
-                q->setResultHint( trackResult.value( "trackuri" ).toString() );
-                q->setProperty( "annotation", trackResult.value( "trackuri" ).toString() );
+                tLog() << "Setting resulthint to " << item.toObject()["uri"].toString();
+                q->setResultHint( item.toObject()["uri"].toString() );
+                q->setProperty( "annotation", item.toObject()["uri"].toString() );
 
                 m_tracks << q;
-            }
+
         }
     }
     else
@@ -308,23 +335,37 @@ SpotifyParser::spotifyTrackLookupFinished()
             checkTrackFinished();
             return;
         }
-        else if ( !res.contains( "track" ) )
+
+
+        // Parse document
+        QJsonDocument doc(QJsonDocument::fromJson(jsonData));
+
+        // Get JSON object
+        QJsonObject jsonObject = doc.object();
+
+        if ( jsonObject["type"].toString() != "track" )
         {
-            tLog() << "No 'track' item in the spotify track lookup result... not doing anything";
+            tLog() << "No 'type' item in the spotify track lookup result... not doing anything" << res;
             checkTrackFinished();
             return;
         }
+        tLog() << "Parsing Spotify Song: " << jsonObject["name"].toString();
 
         // lets parse this baby
         QVariantMap t = res.value( "track" ).toMap();
         QString title, artist, album;
 
-        title = t.value( "name", QString() ).toString();
-        // TODO for now only take the first artist
-        if ( t.contains( "artists" ) && t[ "artists" ].canConvert< QVariantList >() && t[ "artists" ].toList().size() > 0 )
-            artist = t[ "artists" ].toList().first().toMap().value( "name", QString() ).toString();
-        if ( t.contains( "album" ) && t[ "album" ].canConvert< QVariantMap >() )
-            album = t[ "album" ].toMap().value( "name", QString() ).toString();
+        title = jsonObject["name"].toString();
+
+        QVariantMap jsonMap = jsonObject.toVariantMap();
+
+
+        artist = jsonMap["artists"].toList().first().toMap().value( "name", QString() ).toString();
+        album = jsonMap["album"].toMap().value( "name", QString() ).toString();
+
+        tLog() << "artist: " << artist;
+        tLog() << "album: " << album;
+
 
         if ( title.isEmpty() && artist.isEmpty() ) // don't have enough...
         {
