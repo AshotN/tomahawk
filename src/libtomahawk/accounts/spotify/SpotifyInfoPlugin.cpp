@@ -140,7 +140,6 @@ SpotifyInfoPlugin::notInCacheSlot( InfoStringHash criteria, InfoRequestData requ
 
         // Use always Spotify webservice, faster and more stable
         QUrl lookupUrl = QUrl(QString( "https://api.spotify.com/v1/albums/%1" ).arg( album )) ;
-        tLog() << "Album Lookup: " << album;
 
         QNetworkReply * reply = Tomahawk::Utils::nam()->get( QNetworkRequest( lookupUrl ) );
         NewClosure( reply, SIGNAL( finished() ), this, SLOT( albumIdLookupFinished( QNetworkReply*, Tomahawk::InfoSystem::InfoRequestData ) ), reply, requestData );

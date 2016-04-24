@@ -188,7 +188,6 @@ SpotifyParser::lookupSpotifyBrowse( const QString& link )
         return; // Type not supported.
     }
 
-    tLog() << "YEP YEP" << m_browseUri;
     QUrl url;
 
     if ( type == DropJob::Album ){
@@ -206,10 +205,6 @@ SpotifyParser::lookupSpotifyBrowse( const QString& link )
         tLog() << "Bad type: " << type;
         return;
     }
-
-    tLog() << "SpotifyParse: " << url;
-
-
 }
 
 
@@ -251,7 +246,7 @@ SpotifyParser::spotifyAlbumBrowseFinished()
     Q_ASSERT( r );
     r->deleteLater();
     m_queries.remove( r );
-
+    
     if ( r->reply()->error() == QNetworkReply::NoError )
     {
         bool ok;
@@ -270,35 +265,35 @@ SpotifyParser::spotifyAlbumBrowseFinished()
             checkTrackFinished();
             return;
         }
-                QJsonArray items = jsonObject["tracks"].toObject()["items"].toArray();
+        QJsonArray items = jsonObject["tracks"].toObject()["items"].toArray();
 
 
-            // TODO for now only take the first artist
-            QString album = jsonObject["name"].toString();
-            foreach ( QJsonValue item, items )
+        // TODO for now only take the first artist
+        QString album = jsonObject["name"].toString();
+        foreach ( QJsonValue item, items )
+        {
+
+            QString title, artist;
+
+            title = item.toObject()["name"].toString();
+            artist = item.toObject()["artists"].toArray()[0].toObject()["name"].toString();
+
+            tLog() << "Title: " << title << "   Artist: " << artist << "    Album: " << album;
+            if ( title.isEmpty() && artist.isEmpty() ) // don't have enough...
             {
-
-               QString title, artist;
-
-                title = item.toObject()["name"].toString();
-                artist = item.toObject()["artists"].toArray()[0].toObject()["name"].toString();
-
-                tLog() << "Title: " << title << "   Artist: " << artist << "    Album: " << album;
-                if ( title.isEmpty() && artist.isEmpty() ) // don't have enough...
-                {
-                    tLog() << "Didn't get an artist and track name from spotify, not enough to build a query on. Aborting" << title << artist << album;
-                    return;
-                }
-
-                Tomahawk::query_ptr q = Tomahawk::Query::get( artist, title, album, uuid(), m_trackMode );
-                if ( q.isNull() )
-                    continue;
-
-                tLog() << "Setting resulthint to " << item.toObject()["uri"].toString();
-                q->setResultHint( item.toObject()["uri"].toString() );
-                q->setProperty( "annotation", item.toObject()["uri"].toString() );
-
-                m_tracks << q;
+                tLog() << "Didn't get an artist and track name from spotify, not enough to build a query on. Aborting" << title << artist << album;
+                return;
+            }
+            
+            Tomahawk::query_ptr q = Tomahawk::Query::get( artist, title, album, uuid(), m_trackMode );
+            if ( q.isNull() )
+                continue;
+            
+            tLog() << "Setting resulthint to " << item.toObject()["uri"].toString();
+            q->setResultHint( item.toObject()["uri"].toString() );
+            q->setProperty( "annotation", item.toObject()["uri"].toString() );
+            
+            m_tracks << q;
 
         }
     }
@@ -307,7 +302,7 @@ SpotifyParser::spotifyAlbumBrowseFinished()
         JobStatusView::instance()->model()->addJob( new ErrorStatusMessage( tr( "Error fetching Spotify information from the network!" ) ) );
         tLog() << "Error in network request to Spotify for track decoding:" << r->reply()->errorString();
     }
-
+    
     if ( m_trackMode )
         checkTrackFinished();
     else
@@ -325,17 +320,7 @@ SpotifyParser::spotifyTrackLookupFinished()
 
     if ( r->reply()->error() == QNetworkReply::NoError )
     {
-        bool ok;
         QByteArray jsonData = r->reply()->readAll();
-        QVariantMap res = TomahawkUtils::parseJson( jsonData, &ok ).toMap();
-
-        if ( !ok )
-        {
-            tLog() << "Failed to parse json from Spotify track lookup:" << jsonData;
-            checkTrackFinished();
-            return;
-        }
-
 
         // Parse document
         QJsonDocument doc(QJsonDocument::fromJson(jsonData));
@@ -343,29 +328,30 @@ SpotifyParser::spotifyTrackLookupFinished()
         // Get JSON object
         QJsonObject jsonObject = doc.object();
 
+        if ( jsonObject.isEmpty() )
+        {
+            tLog() << "Failed to parse json from Spotify track lookup:" << jsonData;
+            checkTrackFinished();
+            return;
+        }
+
         if ( jsonObject["type"].toString() != "track" )
         {
-            tLog() << "No 'type' item in the spotify track lookup result... not doing anything" << res;
+            tLog() << "No 'type' item in the spotify track lookup result... not doing anything";
             checkTrackFinished();
             return;
         }
         tLog() << "Parsing Spotify Song: " << jsonObject["name"].toString();
 
         // lets parse this baby
-        QVariantMap t = res.value( "track" ).toMap();
         QString title, artist, album;
 
         title = jsonObject["name"].toString();
 
         QVariantMap jsonMap = jsonObject.toVariantMap();
 
-
-        artist = jsonMap["artists"].toList().first().toMap().value( "name", QString() ).toString();
-        album = jsonMap["album"].toMap().value( "name", QString() ).toString();
-
-        tLog() << "artist: " << artist;
-        tLog() << "album: " << album;
-
+        artist = jsonObject["artists"].toArray()[0].toObject()["name"].toString();
+        album = jsonObject["album"].toObject()["name"].toString();
 
         if ( title.isEmpty() && artist.isEmpty() ) // don't have enough...
         {
@@ -376,7 +362,7 @@ SpotifyParser::spotifyTrackLookupFinished()
         Tomahawk::query_ptr q = Tomahawk::Query::get( artist, title, album, uuid(), m_trackMode );
         if ( !q.isNull() )
         {
-            q->setResultHint( t.value( "trackuri" ).toString() );
+            q->setResultHint( jsonObject["uri"].toString() );
 
             m_tracks << q;
         }

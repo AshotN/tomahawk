@@ -542,15 +542,11 @@ void
 TrackView::dragEnterEvent( QDragEnterEvent* event )
 {
     tDebug() << Q_FUNC_INFO;
-
-    tLog() << "MimeType: " << event;
-
-
-
     QTreeView::dragEnterEvent( event );
 
     if ( !model() || model()->isReadOnly() || model()->isLoading() )
     {
+        //Don't know if this is a good idea...
         if(model()->isLoading()){
             QMessageBox::information(
                 this,
@@ -560,8 +556,6 @@ TrackView::dragEnterEvent( QDragEnterEvent* event )
         event->ignore();
         return;
     }
-
-    tLog() << "MimeType: " << event->mimeData();
     if ( DropJob::acceptsMimeData( event->mimeData() ) )
     {
         m_dragging = true;
